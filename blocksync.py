@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """
 Synchronise block devices over the network
 
@@ -76,7 +77,10 @@ def server(dev, blocksize):
             break
 
 
-def sync(workerid, srcdev, dsthost, dstdev = None, blocksize = 1024 * 1024, keyfile = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False):
+def sync(workerid, srcdev, dsthost, remotescript = None, dstdev = None, blocksize = 1024 * 1024, keyfile = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False):
+
+    if not remotescript:
+        remotescript = os.path.basename(__file__)
 
     if not dstdev:
         dstdev = srcdev
@@ -112,7 +116,7 @@ def sync(workerid, srcdev, dsthost, dstdev = None, blocksize = 1024 * 1024, keyf
         cmd += [dsthost]
     if sudo:
         cmd += ['sudo']
-    cmd += ['python', os.path.basename(__file__), 'server', dstdev, '-b', str(blocksize)]
+    cmd += ['python', remotescript, 'server', dstdev, '-b', str(blocksize)]
 
     print "[worker %d] Running: %s" % (workerid, " ".join(cmd))
 
@@ -206,6 +210,7 @@ if __name__ == "__main__":
     parser.add_option("-c", "--compress", dest = "compress", action = "store_true", help = "enable compression over SSH (defaults to off)", default = False)
     parser.add_option("-w", "--workers", dest = "workers", type = "int", help = "number of workers to fork (defaults to 1)", default = 1)
     parser.add_option("-n", "--dryrun", dest = "dryrun", action = "store_true", help = "do a dry run (don't write anything, just report differences)", default = False)
+    parser.add_option("-S", "--script", dest = "script", help = "location of script on remote host (defaults to '%s')" % os.path.basename(__file__))
     (options, args) = parser.parse_args()
 
     if len(args) < 2:
@@ -239,7 +244,7 @@ if __name__ == "__main__":
         for i in xrange(options.workers):
             pid = os.fork()
             if pid == 0:
-                sync(i, srcdev, dsthost, dstdev, options.blocksize, options.keyfile, options.pause, options.sudo, options.compress, options.workers, options.dryrun)
+                sync(i, srcdev, dsthost, options.script, dstdev, options.blocksize, options.keyfile, options.pause, options.sudo, options.compress, options.workers, options.dryrun)
                 sys.exit(0)
             else:
                 workers[pid] = i
