@@ -6,6 +6,7 @@ Copyright 2006-2008 Justin Azoff <justin@bouncybouncy.net>
 Copyright 2011 Robert Coup <robert@coup.net.nz>
 Copyright 2012 Holger Ernst <info@ernstdatenmedien.de>
 Copyright 2014 Robert McQueen <robert.mcqueen@collabora.co.uk>
+Copyright 2016 Theodor-Iulian Ciobanu
 License: GPL
 
 Getting started:
@@ -188,7 +189,7 @@ def sync(workerid, srcdev, dsthost, remotescript = None, dstdev = None, blocksiz
         t1 = time.time()
         if (t1 - t_last) >= interval:
             rate = (same_blocks + diff_blocks + 1.0) * blocksize / (1024.0 * 1024.0) / (t1 - t0)
-            print "[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s (%s remaining)" % (workerid, same_blocks, diff_blocks, same_blocks + diff_blocks, size_blocks, rate, timedelta(seconds = ceil((size_blocks - same_blocks - diff_blocks) / rate)))
+            print "[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s (%s remaining)" % (workerid, same_blocks, diff_blocks, same_blocks + diff_blocks, size_blocks, rate, timedelta(seconds = ceil((size_blocks - same_blocks - diff_blocks) * blocksize / (rate * 1024 * 1024))))
             t_last = t1
 
         if (same_blocks + diff_blocks) == size_blocks:
