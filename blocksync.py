@@ -27,6 +27,7 @@ from base64 import b64encode
 from math import ceil
 import subprocess
 import time
+from datetime import timedelta
 
 SAME = "0"
 DIFF = "1"
@@ -77,7 +78,7 @@ def server(dev, blocksize):
             break
 
 
-def sync(workerid, srcdev, dsthost, remotescript = None, dstdev = None, blocksize = 1024 * 1024, keyfile = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False):
+def sync(workerid, srcdev, dsthost, remotescript = None, dstdev = None, blocksize = 1024 * 1024, keyfile = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False, interval = 1):
 
     if not remotescript:
         remotescript = os.path.basename(__file__)
@@ -185,9 +186,9 @@ def sync(workerid, srcdev, dsthost, remotescript = None, dstdev = None, blocksiz
             continue
 
         t1 = time.time()
-        if t1 - t_last > 1:
-            rate = (i + 1.0) * blocksize / (1024.0 * 1024.0) / (t1 - t0)
-            print "[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s\n" % (workerid, same_blocks, diff_blocks, same_blocks + diff_blocks, size_blocks, rate),
+        if (t1 - t_last) >= interval:
+            rate = (same_blocks + diff_blocks + 1.0) * blocksize / (1024.0 * 1024.0) / (t1 - t0)
+            print "[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s (%s remaining)" % (workerid, same_blocks, diff_blocks, same_blocks + diff_blocks, size_blocks, rate, timedelta(seconds = ceil((size_blocks - same_blocks - diff_blocks) / rate)))
             t_last = t1
 
         if (same_blocks + diff_blocks) == size_blocks:
@@ -211,6 +212,7 @@ if __name__ == "__main__":
     parser.add_option("-w", "--workers", dest = "workers", type = "int", help = "number of workers to fork (defaults to 1)", default = 1)
     parser.add_option("-n", "--dryrun", dest = "dryrun", action = "store_true", help = "do a dry run (don't write anything, just report differences)", default = False)
     parser.add_option("-S", "--script", dest = "script", help = "location of script on remote host (defaults to '%s')" % os.path.basename(__file__))
+    parser.add_option("-t", "--interval", dest = "interval", type = "int", help = "interval between stats output (seconds, defaults to 1)", default = 1)
     (options, args) = parser.parse_args()
 
     if len(args) < 2:
@@ -244,7 +246,7 @@ if __name__ == "__main__":
         for i in xrange(options.workers):
             pid = os.fork()
             if pid == 0:
-                sync(i, srcdev, dsthost, options.script, dstdev, options.blocksize, options.keyfile, options.pause, options.sudo, options.compress, options.workers, options.dryrun)
+                sync(i, srcdev, dsthost, options.script, dstdev, options.blocksize, options.keyfile, options.pause, options.sudo, options.compress, options.workers, options.dryrun, options.interval)
                 sys.exit(0)
             else:
                 workers[pid] = i
