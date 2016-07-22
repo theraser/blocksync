@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Synchronise block devices over the network
 
@@ -6,7 +5,6 @@ Copyright 2006-2008 Justin Azoff <justin@bouncybouncy.net>
 Copyright 2011 Robert Coup <robert@coup.net.nz>
 Copyright 2012 Holger Ernst <info@ernstdatenmedien.de>
 Copyright 2014 Robert McQueen <robert.mcqueen@collabora.co.uk>
-Copyrught 2016 Theodor Ciobanu
 License: GPL
 
 Getting started:
@@ -70,7 +68,7 @@ def server(dev, blocksize):
         sys.stdout.write(sha512(block).digest())
         sys.stdout.flush()
         res = sys.stdin.read(COMPLEN)
-        if res != SAME:
+        if res == DIFF:
             newblock = sys.stdin.read(blocksize)
             f.seek(-len(newblock), 1)
             f.write(newblock)
@@ -78,7 +76,7 @@ def server(dev, blocksize):
             break
 
 
-def sync(workerid, srcdev, dsthost, dstdev = None, blocksize = 1024 * 1024, keyfile = None, pause = 0, sudo = False, compress = False, workers = 1):
+def sync(workerid, srcdev, dsthost, dstdev = None, blocksize = 1024 * 1024, keyfile = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False):
 
     if not dstdev:
         dstdev = srcdev
@@ -162,15 +160,19 @@ def sync(workerid, srcdev, dsthost, dstdev = None, blocksize = 1024 * 1024, keyf
         r_sum = p_out.read(HASHLEN)
         #print "[worker %d] %s %s" % (workerid, b64encode(l_sum), b64encode(r_sum))
         if l_sum == r_sum:
+            same_blocks += 1
             p_in.write(SAME)
             p_in.flush()
-            same_blocks += 1
         else:
-            p_in.write(DIFF)
-            p_in.flush()
-            p_in.write(l_block)
-            p_in.flush()
             diff_blocks += 1
+            if dryrun:
+                p_in.write(SAME)
+                p_in.flush()
+            else:
+                p_in.write(DIFF)
+                p_in.flush()
+                p_in.write(l_block)
+                p_in.flush()
 
         if pause_ms:
             time.sleep(pause_ms)
@@ -201,8 +203,9 @@ if __name__ == "__main__":
     parser.add_option("-i", "--id", dest = "keyfile", help = "ssh public key file")
     parser.add_option("-p", "--pause", dest = "pause", type="int", help = "pause between processing blocks, reduces system load (ms, defaults to 0)", default = 0)
     parser.add_option("-s", "--sudo", dest = "sudo", action = "store_true", help = "use sudo on the remote end (defaults to off)", default = False)
-    parser.add_option("-c", "--compress", dest = "compress", action = "store_true", help = "enable compression over SSH (default to off)", default = False)
+    parser.add_option("-c", "--compress", dest = "compress", action = "store_true", help = "enable compression over SSH (defaults to off)", default = False)
     parser.add_option("-w", "--workers", dest = "workers", type = "int", help = "number of workers to fork (defaults to 1)", default = 1)
+    parser.add_option("-n", "--dryrun", dest = "dryrun", action = "store_true", help = "do a dry run (don't write anything, just report differences)", default = False)
     (options, args) = parser.parse_args()
 
     if len(args) < 2:
@@ -221,11 +224,22 @@ if __name__ == "__main__":
         else:
             dstdev = None
 
+        if options.dryrun:
+            print("Dryrun - will only report differences, no data will be written")
+        else:
+            print("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            print("!!!                                          !!!")
+            print("!!! DESTINATION WILL BE PERMANENTLY CHANGED! !!!")
+            print("!!!         PRESS CTRL-C NOW TO EXIT         !!!")
+            print("!!!                                          !!!")
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
+            time.sleep(5)
+
         workers = {}
         for i in xrange(options.workers):
             pid = os.fork()
             if pid == 0:
-                sync(i, srcdev, dsthost, dstdev, options.blocksize, options.keyfile, options.pause, options.sudo, options.compress, options.workers)
+                sync(i, srcdev, dsthost, dstdev, options.blocksize, options.keyfile, options.pause, options.sudo, options.compress, options.workers, options.dryrun)
                 sys.exit(0)
             else:
                 workers[pid] = i
