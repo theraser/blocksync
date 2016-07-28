@@ -79,7 +79,7 @@ def server(dev, blocksize):
             break
 
 
-def sync(workerid, srcdev, dsthost, remotescript = None, dstdev = None, blocksize = 1024 * 1024, keyfile = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False, interval = 1):
+def sync(workerid, srcdev, dsthost, user, cipher = "blowfish", remotescript = None, dstdev = None, blocksize = 1024 * 1024, keyfile = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False, interval = 1):
 
     if not remotescript:
         remotescript = os.path.basename(__file__)
@@ -110,7 +110,9 @@ def sync(workerid, srcdev, dsthost, remotescript = None, dstdev = None, blocksiz
 
     cmd = []
     if dsthost != 'localhost':
-        cmd += ['ssh', '-c', 'blowfish']
+        cmd += ['ssh', '-c', cipher]
+        if user:
+            cmd += ['-l', user]
         if keyfile:
             cmd += ['-i', keyfile]
         if compress:
@@ -205,12 +207,14 @@ def sync(workerid, srcdev, dsthost, remotescript = None, dstdev = None, blocksiz
 if __name__ == "__main__":
     from optparse import OptionParser, SUPPRESS_HELP
     parser = OptionParser(usage = "%prog [options] /dev/source [user@]remotehost [/dev/dest]")
-    parser.add_option("-b", "--blocksize", dest = "blocksize", type = "int", help = "block size (bytes, defaults to 1MB)", default = 1024 * 1024)
-    parser.add_option("-i", "--id", dest = "keyfile", help = "ssh public key file")
-    parser.add_option("-p", "--pause", dest = "pause", type="int", help = "pause between processing blocks, reduces system load (ms, defaults to 0)", default = 0)
-    parser.add_option("-s", "--sudo", dest = "sudo", action = "store_true", help = "use sudo on the remote end (defaults to off)", default = False)
-    parser.add_option("-c", "--compress", dest = "compress", action = "store_true", help = "enable compression over SSH (defaults to off)", default = False)
     parser.add_option("-w", "--workers", dest = "workers", type = "int", help = "number of workers to fork (defaults to 1)", default = 1)
+    parser.add_option("-b", "--blocksize", dest = "blocksize", type = "int", help = "block size (bytes, defaults to 1MB)", default = 1024 * 1024)
+    parser.add_option("-p", "--pause", dest = "pause", type="int", help = "pause between processing blocks, reduces system load (ms, defaults to 0)", default = 0)
+    parser.add_option("-c", "--cipher", dest = "cipher", help = "cipher specification for SSH (defaults to 'blowfish')", default = "blowfish")
+    parser.add_option("-C", "--compress", dest = "compress", action = "store_true", help = "enable compression over SSH (defaults to on)", default = True)
+    parser.add_option("-l", "--user", dest = "user", help = "user to SSH as on the remote server")
+    parser.add_option("-i", "--id", dest = "keyfile", help = "ssh public key file")
+    parser.add_option("-s", "--sudo", dest = "sudo", action = "store_true", help = "use sudo on the remote end (defaults to off)", default = False)
     parser.add_option("-n", "--dryrun", dest = "dryrun", action = "store_true", help = "do a dry run (don't write anything, just report differences)", default = False)
     parser.add_option("-S", "--script", dest = "script", help = "location of script on remote host (defaults to '%s')" % os.path.basename(__file__))
     parser.add_option("-t", "--interval", dest = "interval", type = "int", help = "interval between stats output (seconds, defaults to 1)", default = 1)
@@ -247,7 +251,7 @@ if __name__ == "__main__":
         for i in xrange(options.workers):
             pid = os.fork()
             if pid == 0:
-                sync(i, srcdev, dsthost, options.script, dstdev, options.blocksize, options.keyfile, options.pause, options.sudo, options.compress, options.workers, options.dryrun, options.interval)
+                sync(i, srcdev, dsthost, options.user, options.cipher, options.script, dstdev, options.blocksize, options.keyfile, options.pause, options.sudo, options.compress, options.workers, options.dryrun, options.interval)
                 sys.exit(0)
             else:
                 workers[pid] = i
