@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 """
 Synchronise block devices over the network
 
@@ -55,7 +55,7 @@ def getblocks(f, blocksize):
         yield block
 
 
-def server(dev, blocksize):
+def server(dev, blocksize, deleteonexit):
     print dev, blocksize
     f, size = do_open(dev, 'r+')
     print size
@@ -78,17 +78,32 @@ def server(dev, blocksize):
         if i == maxblock:
             break
 
+    if deleteonexit:
+        os.remove(__file__)
 
-def sync(workerid, srcdev, dsthost, user, cipher = "blowfish", remotescript = None, dstdev = None, blocksize = 1024 * 1024, keyfile = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False, interval = 1):
 
-    if not remotescript:
-        remotescript = os.path.basename(__file__)
+def copy_self(workerid, remotecmd):
+    with open(__file__) as srcfile:
+        cmd = remotecmd + ['/usr/bin/env', 'sh', '-c', '"SCRIPTNAME=\`mktemp -q\`; cat >\$SCRIPTNAME; echo \$SCRIPTNAME"', '<<EOT\n', srcfile.read(), '\nEOT']
 
+    p = subprocess.Popen(cmd, bufsize=0, stdin=subprocess.PIPE, stdout=subprocess.PIPE, close_fds=True)
+    p_in, p_out = p.stdin, p.stdout
+
+    remotescript = p_out.readline().strip()
+    p.poll()
+    if p.returncode is not None:
+        print "[worker %d] Error copying blocksync to the remote host!" % (workerid)
+        sys.exit(1)
+
+    return remotescript
+
+
+def sync(workerid, srcdev, dsthost, cipher = "blowfish", interpreter = "python2", remotescript = None, dstdev = None, blocksize = 1024 * 1024, keyfile = None, passenv = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False, interval = 1):
     if not dstdev:
         dstdev = srcdev
 
     print "Starting worker #%d (pid: %d)" % (workerid, os.getpid())
-    print "[worker %d] Block size is %0.1f MB" % (workerid, float(blocksize) / (1024 * 1024))
+    print "[worker %d] Block size is %0.1f MB" % (workerid, blocksize / (1024.0 * 1024))
 
     try:
         f, size = do_open(srcdev, 'r')
@@ -100,19 +115,19 @@ def sync(workerid, srcdev, dsthost, user, cipher = "blowfish", remotescript = No
     startpos = workerid * chunksize
     if workerid == (workers - 1):
         chunksize += size - (chunksize * workers)
-    print "[worker %d] Chunk size is %0.1f MB, offset is %d" % (workerid, float(chunksize) / (1024 * 1024), startpos)
+    print "[worker %d] Chunk size is %0.1f MB, offset is %d" % (workerid, chunksize / (1024.0 * 1024), startpos)
 
     pause_ms = 0
     if pause:
         # sleep() wants seconds...
-        pause_ms = float(pause) / 1000
+        pause_ms = pause / 1000.0
         print "[worker %d] Slowing down for %d ms/block (%0.4f sec/block)" % (workerid, pause, pause_ms)
 
     cmd = []
     if dsthost != 'localhost':
+        if passenv:
+            cmd += ['/usr/bin/env', 'SSHPASS=%s' % (os.environ[passenv]), 'sshpass', '-e']
         cmd += ['ssh', '-c', cipher]
-        if user:
-            cmd += ['-l', user]
         if keyfile:
             cmd += ['-i', keyfile]
         if compress:
@@ -120,9 +135,19 @@ def sync(workerid, srcdev, dsthost, user, cipher = "blowfish", remotescript = No
         cmd += [dsthost]
     if sudo:
         cmd += ['sudo']
-    cmd += ['python', remotescript, 'server', dstdev, '-b', str(blocksize)]
 
-    print "[worker %d] Running: %s" % (workerid, " ".join(cmd))
+    if remotescript:
+        servercmd = 'server'
+    elif (dsthost =='localhost'):
+        servercmd = 'server'
+        remotescript = __file__
+    else:
+        servercmd = 'tmpserver'
+        remotescript = copy_self(workerid, cmd)
+
+    cmd += [interpreter, remotescript, servercmd, dstdev, '-b', str(blocksize)]
+
+    print "[worker %d] Running: %s" % (workerid, " ".join(cmd[2 if passenv and (dsthost != 'localhost') else 0:]))
 
     p = subprocess.Popen(cmd, bufsize=0, stdin=subprocess.PIPE, stdout=subprocess.PIPE, close_fds=True)
     p_in, p_out = p.stdin, p.stdout
@@ -153,7 +178,7 @@ def sync(workerid, srcdev, dsthost, user, cipher = "blowfish", remotescript = No
     elif size < remote_size:
         print "[worker %d] Source device size (%d) is smaller than remote device size (%d), proceeding anyway" % (workerid, size, remote_size)
 
-    same_blocks = diff_blocks = 0
+    same_blocks = diff_blocks = last_blocks = 0
     interactive = os.isatty(sys.stdout.fileno())
 
     t0 = time.time()
@@ -161,6 +186,7 @@ def sync(workerid, srcdev, dsthost, user, cipher = "blowfish", remotescript = No
     f.seek(startpos)
     size_blocks = ceil(chunksize / float(blocksize))
     p_in.write("%d\n%d\n" % (startpos, size_blocks))
+    p_in.flush()
     print "[worker %d] Start syncing %d blocks..." % (workerid, size_blocks)
     for l_block in getblocks(f, blocksize):
         #l_sum = b64encode(sha512(l_block).digest())
@@ -188,19 +214,22 @@ def sync(workerid, srcdev, dsthost, user, cipher = "blowfish", remotescript = No
         if not interactive:
             continue
 
-        t1 = time.time()
+        t1 = float(time.time())
         if (t1 - t_last) >= interval:
-            rate = (same_blocks + diff_blocks + 1.0) * blocksize / (1024.0 * 1024.0) / (t1 - t0)
-            print "[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s (%s remaining)" % (workerid, same_blocks, diff_blocks, same_blocks + diff_blocks, size_blocks, rate, timedelta(seconds = ceil((size_blocks - same_blocks - diff_blocks) * blocksize / (rate * 1024 * 1024))))
+            done_blocks = same_blocks + diff_blocks
+            delta_blocks = done_blocks - last_blocks
+            rate = delta_blocks * blocksize / (1024 * 1024 * (t1 - t_last))
+            print "[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s (%s remaining)" % (workerid, same_blocks, diff_blocks, done_blocks, size_blocks, rate, timedelta(seconds = ceil((size_blocks - done_blocks) * (t1 - t0) / done_blocks)))
+            last_blocks = done_blocks
             t_last = t1
 
         if (same_blocks + diff_blocks) == size_blocks:
             break
 
-    rate = (i + 1.0) * blocksize / (1024.0 * 1024.0) / (time.time() - t0)
+    rate = size_blocks * blocksize / (1024.0 * 1024) / (time.time() - t0)
     print "[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s" % (workerid, same_blocks, diff_blocks, same_blocks + diff_blocks, size_blocks, rate)
 
-    print "[worker %d] Completed in %d seconds" % (workerid, time.time() - t0)
+    print "[worker %d] Completed in %s" % (workerid, timedelta(seconds = ceil(time.time() - t0)))
 
     return same_blocks, diff_blocks
 
@@ -210,13 +239,14 @@ if __name__ == "__main__":
     parser.add_option("-w", "--workers", dest = "workers", type = "int", help = "number of workers to fork (defaults to 1)", default = 1)
     parser.add_option("-b", "--blocksize", dest = "blocksize", type = "int", help = "block size (bytes, defaults to 1MB)", default = 1024 * 1024)
     parser.add_option("-p", "--pause", dest = "pause", type="int", help = "pause between processing blocks, reduces system load (ms, defaults to 0)", default = 0)
-    parser.add_option("-c", "--cipher", dest = "cipher", help = "cipher specification for SSH (defaults to 'blowfish')", default = "blowfish")
+    parser.add_option("-c", "--cipher", dest = "cipher", help = "cipher specification for SSH (defaults to blowfish)", default = "blowfish")
     parser.add_option("-C", "--compress", dest = "compress", action = "store_true", help = "enable compression over SSH (defaults to on)", default = True)
-    parser.add_option("-l", "--user", dest = "user", help = "user to SSH as on the remote server")
-    parser.add_option("-i", "--id", dest = "keyfile", help = "ssh public key file")
+    parser.add_option("-i", "--id", dest = "keyfile", help = "SSH public key file")
+    parser.add_option("-P", "--pass", dest = "passenv", help = "environment variable containing SSH password (requires sshpass)")
     parser.add_option("-s", "--sudo", dest = "sudo", action = "store_true", help = "use sudo on the remote end (defaults to off)", default = False)
     parser.add_option("-n", "--dryrun", dest = "dryrun", action = "store_true", help = "do a dry run (don't write anything, just report differences)", default = False)
-    parser.add_option("-S", "--script", dest = "script", help = "location of script on remote host (defaults to '%s')" % os.path.basename(__file__))
+    parser.add_option("-S", "--script", dest = "script", help = "location of script on remote host (otherwise current script is sent over)")
+    parser.add_option("-I", "--interpreter", dest = "interpreter", help = "[full path to] interpreter used to invoke remote server (defaults to python2)", default = "python2")
     parser.add_option("-t", "--interval", dest = "interval", type = "int", help = "interval between stats output (seconds, defaults to 1)", default = 1)
     (options, args) = parser.parse_args()
 
@@ -227,7 +257,10 @@ if __name__ == "__main__":
 
     if args[0] == 'server':
         dstdev = args[1]
-        server(dstdev, options.blocksize)
+        server(dstdev, options.blocksize, False)
+    elif args[0] == 'tmpserver':
+        dstdev = args[1]
+        server(dstdev, options.blocksize, True)
     else:
         srcdev = args[0]
         dsthost = args[1]
@@ -251,7 +284,7 @@ if __name__ == "__main__":
         for i in xrange(options.workers):
             pid = os.fork()
             if pid == 0:
-                sync(i, srcdev, dsthost, options.user, options.cipher, options.script, dstdev, options.blocksize, options.keyfile, options.pause, options.sudo, options.compress, options.workers, options.dryrun, options.interval)
+                sync(i, srcdev, dsthost, options.cipher, options.interpreter, options.script, dstdev, options.blocksize, options.keyfile, options.passenv, options.pause, options.sudo, options.compress, options.workers, options.dryrun, options.interval)
                 sys.exit(0)
             else:
                 workers[pid] = i
