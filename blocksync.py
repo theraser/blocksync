@@ -23,8 +23,7 @@ Getting started:
 
 import os
 import sys
-from hashlib import sha512
-from base64 import b64encode
+from hashlib import sha512, sha384, sha1, md5
 from math import ceil
 import subprocess
 import time
@@ -34,9 +33,11 @@ SAME = "0"
 DIFF = "1"
 COMPLEN = len(SAME)  # SAME/DIFF length
 
-B64SHA = int(ceil(sha512().digest_size * 4 / 3.0))
-#HASHLEN = B64SHA + (4 - B64SHA % 4)
-HASHLEN = sha512().digest_size
+
+def do_create(f, size):
+    f = open(f, 'a')
+    f.truncate(size)
+    f.close()
 
 
 def do_open(f, mode):
@@ -55,7 +56,23 @@ def getblocks(f, blocksize):
         yield block
 
 
-def server(dev, blocksize, deleteonexit):
+def server(dev, deleteonexit, options):
+    blocksize, addhash = options.blocksize, options.addhash
+
+    if options.weakhash:
+        hash1 = sha1
+        hash2 = md5
+    else:
+        hash1 = sha512
+        hash2 = sha384
+
+    print 'init'
+    sys.stdout.flush()
+
+    size = int(sys.stdin.readline().strip())
+    if size > 0:
+        do_create(dev, size)
+
     print dev, blocksize
     f, size = do_open(dev, 'r+')
     print size
@@ -67,8 +84,9 @@ def server(dev, blocksize, deleteonexit):
     f.seek(startpos)
 
     for i, block in enumerate(getblocks(f, blocksize)):
-        #sys.stdout.write(b64encode(sha512(block).digest()))
-        sys.stdout.write(sha512(block).digest())
+        sys.stdout.write(hash1(block).digest())
+        if addhash:
+            sys.stdout.write(hash2(block).digest())
         sys.stdout.flush()
         res = sys.stdin.read(COMPLEN)
         if res == DIFF:
@@ -98,9 +116,23 @@ def copy_self(workerid, remotecmd):
     return remotescript
 
 
-def sync(workerid, srcdev, dsthost, cipher = "blowfish", interpreter = "python2", remotescript = None, dstdev = None, blocksize = 1024 * 1024, keyfile = None, passenv = None, pause = 0, sudo = False, compress = False, workers = 1, dryrun = False, interval = 1):
+def sync(workerid, srcdev, dsthost, dstdev, options):
+    blocksize = options.blocksize
+    addhash = options.addhash
+    dryrun = options.dryrun
+    interval = options.interval
+
     if not dstdev:
         dstdev = srcdev
+
+    if options.weakhash:
+        hash1 = sha1
+        hash2 = md5
+    else:
+        hash1 = sha512
+        hash2 = sha384
+    hash1len = hash1().digestsize
+    hash2len = hash2().digestsize
 
     print "Starting worker #%d (pid: %d)" % (workerid, os.getpid())
     print "[worker %d] Block size is %0.1f MB" % (workerid, blocksize / (1024.0 * 1024))
@@ -111,33 +143,34 @@ def sync(workerid, srcdev, dsthost, cipher = "blowfish", interpreter = "python2"
         print "[worker %d] Error accessing source device! %s" % (workerid, e)
         sys.exit(1)
 
-    chunksize = int(size / workers)
+    chunksize = int(size / options.workers)
     startpos = workerid * chunksize
-    if workerid == (workers - 1):
-        chunksize += size - (chunksize * workers)
+    if workerid == (options.workers - 1):
+        chunksize += size - (chunksize * options.workers)
     print "[worker %d] Chunk size is %0.1f MB, offset is %d" % (workerid, chunksize / (1024.0 * 1024), startpos)
 
     pause_ms = 0
-    if pause:
+    if options.pause:
         # sleep() wants seconds...
-        pause_ms = pause / 1000.0
-        print "[worker %d] Slowing down for %d ms/block (%0.4f sec/block)" % (workerid, pause, pause_ms)
+        pause_ms = options.pause / 1000.0
+        print "[worker %d] Slowing down for %d ms/block (%0.4f sec/block)" % (workerid, options.pause, pause_ms)
 
     cmd = []
     if dsthost != 'localhost':
-        if passenv:
-            cmd += ['/usr/bin/env', 'SSHPASS=%s' % (os.environ[passenv]), 'sshpass', '-e']
-        cmd += ['ssh', '-c', cipher]
-        if keyfile:
-            cmd += ['-i', keyfile]
-        if compress:
+        if options.passenv:
+            cmd += ['/usr/bin/env', 'SSHPASS=%s' % (os.environ[options.passenv]), 'sshpass', '-e']
+        cmd += ['ssh', '-c', options.cipher]
+        if options.keyfile:
+            cmd += ['-i', options.keyfile]
+        if options.compress:
             cmd += ['-C']
         cmd += [dsthost]
-    if sudo:
+    if options.sudo:
         cmd += ['sudo']
 
-    if remotescript:
+    if options.script:
         servercmd = 'server'
+        remotescript = options.script
     elif (dsthost =='localhost'):
         servercmd = 'server'
         remotescript = __file__
@@ -145,18 +178,33 @@ def sync(workerid, srcdev, dsthost, cipher = "blowfish", interpreter = "python2"
         servercmd = 'tmpserver'
         remotescript = copy_self(workerid, cmd)
 
-    cmd += [interpreter, remotescript, servercmd, dstdev, '-b', str(blocksize)]
+    cmd += [options.interpreter, remotescript, servercmd, dstdev, '-b', str(blocksize)]
 
-    print "[worker %d] Running: %s" % (workerid, " ".join(cmd[2 if passenv and (dsthost != 'localhost') else 0:]))
+    if addhash:
+        cmd += ['-2']
+
+    if options.weakhash:
+        cmd += ['-W']
+
+    print "[worker %d] Running: %s" % (workerid, " ".join(cmd[2 if options.passenv and (dsthost != 'localhost') else 0:]))
 
     p = subprocess.Popen(cmd, bufsize=0, stdin=subprocess.PIPE, stdout=subprocess.PIPE, close_fds=True)
     p_in, p_out = p.stdin, p.stdout
 
     line = p_out.readline()
     p.poll()
-    if p.returncode is not None:
+    if (p.returncode is not None) or (line.strip() != 'init'):
         print "[worker %d] Error connecting to or invoking blocksync on the remote host!" % (workerid)
         sys.exit(1)
+
+    p_in.write("%d\n" % (size if options.createdest else 0))
+    p_in.flush()
+
+    line = p_out.readline()
+    p.poll()
+    if p.returncode is not None:
+      print "[worker %d] Failed creating destination file on the remote host!" % (workerid)
+      sys.exit(1)
 
     a, b = line.split()
     if a != dstdev:
@@ -189,11 +237,15 @@ def sync(workerid, srcdev, dsthost, cipher = "blowfish", interpreter = "python2"
     p_in.flush()
     print "[worker %d] Start syncing %d blocks..." % (workerid, size_blocks)
     for l_block in getblocks(f, blocksize):
-        #l_sum = b64encode(sha512(l_block).digest())
-        l_sum = sha512(l_block).digest()
-        r_sum = p_out.read(HASHLEN)
-        #print "[worker %d] %s %s" % (workerid, b64encode(l_sum), b64encode(r_sum))
-        if l_sum == r_sum:
+        l1_sum = hash1(l_block).digest()
+        r1_sum = p_out.read(hash1len)
+        if addhash:
+            l2_sum = hash2(l_block).digest()
+            r2_sum = p_out.read(hash2len)
+            r2_match = (l2_sum == r2_sum)
+        else:
+            r2_match = True
+        if (l1_sum == r1_sum) and r2_match:
             same_blocks += 1
             p_in.write(SAME)
             p_in.flush()
@@ -238,6 +290,8 @@ if __name__ == "__main__":
     parser = OptionParser(usage = "%prog [options] /dev/source [user@]remotehost [/dev/dest]")
     parser.add_option("-w", "--workers", dest = "workers", type = "int", help = "number of workers to fork (defaults to 1)", default = 1)
     parser.add_option("-b", "--blocksize", dest = "blocksize", type = "int", help = "block size (bytes, defaults to 1MB)", default = 1024 * 1024)
+    parser.add_option("-2", "--additionalhash", dest = "addhash", action = "store_true", help = "use two message digests when comparing blocks", default = False)
+    parser.add_option("-W", "--weakhash", dest = "weakhash", action = "store_true", help = "use weaker but faster message digests (SHA1[+MD5] instead of SHA512[+SHA384])", default = False)
     parser.add_option("-p", "--pause", dest = "pause", type="int", help = "pause between processing blocks, reduces system load (ms, defaults to 0)", default = 0)
     parser.add_option("-c", "--cipher", dest = "cipher", help = "cipher specification for SSH (defaults to blowfish)", default = "blowfish")
     parser.add_option("-C", "--compress", dest = "compress", action = "store_true", help = "enable compression over SSH (defaults to on)", default = True)
@@ -245,6 +299,7 @@ if __name__ == "__main__":
     parser.add_option("-P", "--pass", dest = "passenv", help = "environment variable containing SSH password (requires sshpass)")
     parser.add_option("-s", "--sudo", dest = "sudo", action = "store_true", help = "use sudo on the remote end (defaults to off)", default = False)
     parser.add_option("-n", "--dryrun", dest = "dryrun", action = "store_true", help = "do a dry run (don't write anything, just report differences)", default = False)
+    parser.add_option("-T", "--createdest", dest = "createdest", action = "store_true", help = "create destination file using truncate(2)", default = False)
     parser.add_option("-S", "--script", dest = "script", help = "location of script on remote host (otherwise current script is sent over)")
     parser.add_option("-I", "--interpreter", dest = "interpreter", help = "[full path to] interpreter used to invoke remote server (defaults to python2)", default = "python2")
     parser.add_option("-t", "--interval", dest = "interval", type = "int", help = "interval between stats output (seconds, defaults to 1)", default = 1)
@@ -257,10 +312,10 @@ if __name__ == "__main__":
 
     if args[0] == 'server':
         dstdev = args[1]
-        server(dstdev, options.blocksize, False)
+        server(dstdev, False, options)
     elif args[0] == 'tmpserver':
         dstdev = args[1]
-        server(dstdev, options.blocksize, True)
+        server(dstdev, True, options)
     else:
         srcdev = args[0]
         dsthost = args[1]
@@ -284,7 +339,7 @@ if __name__ == "__main__":
         for i in xrange(options.workers):
             pid = os.fork()
             if pid == 0:
-                sync(i, srcdev, dsthost, options.cipher, options.interpreter, options.script, dstdev, options.blocksize, options.keyfile, options.passenv, options.pause, options.sudo, options.compress, options.workers, options.dryrun, options.interval)
+                sync(i, srcdev, dsthost, dstdev, options)
                 sys.exit(0)
             else:
                 workers[pid] = i
