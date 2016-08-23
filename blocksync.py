@@ -21,6 +21,7 @@ Getting started:
     python blocksync.py /dev/source localhost /dev/dest
 """
 
+from __future__ import print_function
 import os
 import sys
 from hashlib import sha512, sha384, sha1, md5
@@ -66,16 +67,16 @@ def server(dev, deleteonexit, options):
         hash1 = sha512
         hash2 = sha384
 
-    print 'init'
+    print('init')
     sys.stdout.flush()
 
     size = int(sys.stdin.readline().strip())
     if size > 0:
         do_create(dev, size)
 
-    print dev, blocksize
+    print(dev, blocksize)
     f, size = do_open(dev, 'r+')
-    print size
+    print(size)
     sys.stdout.flush()
 
     startpos = int(sys.stdin.readline().strip())
@@ -110,7 +111,7 @@ def copy_self(workerid, remotecmd):
     remotescript = p_out.readline().strip()
     p.poll()
     if p.returncode is not None:
-        print "[worker %d] Error copying blocksync to the remote host!" % (workerid)
+        print("[worker %d] Error copying blocksync to the remote host!" % workerid, file = options.outfile)
         sys.exit(1)
 
     return remotescript
@@ -134,26 +135,26 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
     hash1len = hash1().digestsize
     hash2len = hash2().digestsize
 
-    print "Starting worker #%d (pid: %d)" % (workerid, os.getpid())
-    print "[worker %d] Block size is %0.1f MB" % (workerid, blocksize / (1024.0 * 1024))
+    print("Starting worker #%d (pid: %d)" % (workerid, os.getpid()), file = options.outfile)
+    print("[worker %d] Block size is %0.1f MB" % (workerid, blocksize / (1024.0 * 1024)), file = options.outfile)
 
     try:
         f, size = do_open(srcdev, 'r')
     except Exception, e:
-        print "[worker %d] Error accessing source device! %s" % (workerid, e)
+        print("[worker %d] Error accessing source device! %s" % (workerid, e), file = options.outfile)
         sys.exit(1)
 
     chunksize = int(size / options.workers)
     startpos = workerid * chunksize
     if workerid == (options.workers - 1):
         chunksize += size - (chunksize * options.workers)
-    print "[worker %d] Chunk size is %0.1f MB, offset is %d" % (workerid, chunksize / (1024.0 * 1024), startpos)
+    print("[worker %d] Chunk size is %0.1f MB, offset is %d" % (workerid, chunksize / (1024.0 * 1024), startpos), file = options.outfile)
 
     pause_ms = 0
     if options.pause:
         # sleep() wants seconds...
         pause_ms = options.pause / 1000.0
-        print "[worker %d] Slowing down for %d ms/block (%0.4f sec/block)" % (workerid, options.pause, pause_ms)
+        print("[worker %d] Slowing down for %d ms/block (%0.4f sec/block)" % (workerid, options.pause, pause_ms), file = options.outfile)
 
     cmd = []
     if dsthost != 'localhost':
@@ -188,7 +189,7 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
     if options.weakhash:
         cmd += ['-W']
 
-    print "[worker %d] Running: %s" % (workerid, " ".join(cmd[2 if options.passenv and (dsthost != 'localhost') else 0:]))
+    print("[worker %d] Running: %s" % (workerid, " ".join(cmd[2 if options.passenv and (dsthost != 'localhost') else 0:])), file = options.outfile)
 
     p = subprocess.Popen(cmd, bufsize=0, stdin=subprocess.PIPE, stdout=subprocess.PIPE, close_fds=True)
     p_in, p_out = p.stdin, p.stdout
@@ -196,7 +197,7 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
     line = p_out.readline()
     p.poll()
     if (p.returncode is not None) or (line.strip() != 'init'):
-        print "[worker %d] Error connecting to or invoking blocksync on the remote host!" % (workerid)
+        print("[worker %d] Error connecting to or invoking blocksync on the remote host!" % workerid, file = options.outfile)
         sys.exit(1)
 
     p_in.write("%d\n" % (size if options.createdest else 0))
@@ -205,28 +206,28 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
     line = p_out.readline()
     p.poll()
     if p.returncode is not None:
-      print "[worker %d] Failed creating destination file on the remote host!" % (workerid)
+      print("[worker %d] Failed creating destination file on the remote host!" % workerid, file = options.outfile)
       sys.exit(1)
 
     a, b = line.split()
     if a != dstdev:
-        print "[worker %d] Dest device (%s) doesn't match with the remote host (%s)!" % (workerid, dstdev, a)
+        print("[worker %d] Dest device (%s) doesn't match with the remote host (%s)!" % (workerid, dstdev, a), file = options.outfile)
         sys.exit(1)
     if int(b) != blocksize:
-        print "[worker %d] Source block size (%d) doesn't match with the remote host (%d)!" % (workerid, blocksize, int(b))
+        print("[worker %d] Source block size (%d) doesn't match with the remote host (%d)!" % (workerid, blocksize, int(b)), file = options.outfile)
         sys.exit(1)
 
     line = p_out.readline()
     p.poll()
     if p.returncode is not None:
-        print "[worker %d] Error accessing device on remote host!" % (workerid)
+        print("[worker %d] Error accessing device on remote host!" % workerid, file = options.outfile)
         sys.exit(1)
     remote_size = int(line)
     if size > remote_size:
-        print "[worker %d] Source device size (%d) doesn't fit into remote device size (%d)!" % (workerid, size, remote_size)
+        print("[worker %d] Source device size (%d) doesn't fit into remote device size (%d)!" % (workerid, size, remote_size), file = options.outfile)
         sys.exit(1)
     elif size < remote_size:
-        print "[worker %d] Source device size (%d) is smaller than remote device size (%d), proceeding anyway" % (workerid, size, remote_size)
+        print("[worker %d] Source device size (%d) is smaller than remote device size (%d), proceeding anyway" % (workerid, size, remote_size), file = options.outfile)
 
     same_blocks = diff_blocks = last_blocks = 0
     interactive = os.isatty(sys.stdout.fileno())
@@ -237,7 +238,7 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
     size_blocks = ceil(chunksize / float(blocksize))
     p_in.write("%d\n%d\n" % (startpos, size_blocks))
     p_in.flush()
-    print "[worker %d] Start syncing %d blocks..." % (workerid, size_blocks)
+    print("[worker %d] Start syncing %d blocks..." % (workerid, size_blocks), file = options.outfile)
     for l_block in getblocks(f, blocksize):
         l1_sum = hash1(l_block).digest()
         r1_sum = p_out.read(hash1len)
@@ -273,7 +274,7 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
             done_blocks = same_blocks + diff_blocks
             delta_blocks = done_blocks - last_blocks
             rate = delta_blocks * blocksize / (1024 * 1024 * (t1 - t_last))
-            print "[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s (%s remaining)" % (workerid, same_blocks, diff_blocks, done_blocks, size_blocks, rate, timedelta(seconds = ceil((size_blocks - done_blocks) * (t1 - t0) / done_blocks)))
+            print("[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s (%s remaining)" % (workerid, same_blocks, diff_blocks, done_blocks, size_blocks, rate, timedelta(seconds = ceil((size_blocks - done_blocks) * (t1 - t0) / done_blocks))), file = options.outfile)
             last_blocks = done_blocks
             t_last = t1
 
@@ -281,9 +282,9 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
             break
 
     rate = size_blocks * blocksize / (1024.0 * 1024) / (time.time() - t0)
-    print "[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s" % (workerid, same_blocks, diff_blocks, same_blocks + diff_blocks, size_blocks, rate)
+    print("[worker %d] same: %d, diff: %d, %d/%d, %5.1f MB/s" % (workerid, same_blocks, diff_blocks, same_blocks + diff_blocks, size_blocks, rate), file = options.outfile)
 
-    print "[worker %d] Completed in %s" % (workerid, timedelta(seconds = ceil(time.time() - t0)))
+    print("[worker %d] Completed in %s" % (workerid, timedelta(seconds = ceil(time.time() - t0))), file = options.outfile)
 
     return same_blocks, diff_blocks
 
@@ -300,18 +301,22 @@ if __name__ == "__main__":
     parser.add_option("-i", "--id", dest = "keyfile", help = "SSH public key file")
     parser.add_option("-P", "--pass", dest = "passenv", help = "environment variable containing SSH password (requires sshpass)")
     parser.add_option("-s", "--sudo", dest = "sudo", action = "store_true", help = "use sudo on the remote end (defaults to off)", default = False)
+    parser.add_option("-x", "--extraparams", dest = "sshparams", help = "additional parameters to pass to SSH")
     parser.add_option("-n", "--dryrun", dest = "dryrun", action = "store_true", help = "do a dry run (don't write anything, just report differences)", default = False)
     parser.add_option("-T", "--createdest", dest = "createdest", action = "store_true", help = "create destination file using truncate(2)", default = False)
     parser.add_option("-S", "--script", dest = "script", help = "location of script on remote host (otherwise current script is sent over)")
     parser.add_option("-I", "--interpreter", dest = "interpreter", help = "[full path to] interpreter used to invoke remote server (defaults to python2)", default = "python2")
     parser.add_option("-t", "--interval", dest = "interval", type = "int", help = "interval between stats output (seconds, defaults to 1)", default = 1)
-    parser.add_option("-x", "--extraparams", dest = "sshparams", help = "additional parameters to pass to SSH")
+    parser.add_option("-o", "--output", dest = "outfile", help = "send output to file instead of console")
     (options, args) = parser.parse_args()
 
     if len(args) < 2:
         parser.print_help()
-        print __doc__
+        print(__doc__)
         sys.exit(1)
+
+    if options.outfile:
+        options.outfile = open(options.outfile, 'a')
 
     if args[0] == 'server':
         dstdev = args[1]
@@ -328,14 +333,14 @@ if __name__ == "__main__":
             dstdev = None
 
         if options.dryrun:
-            print("Dryrun - will only report differences, no data will be written")
+            print("Dryrun - will only report differences, no data will be written", file = options.outfile)
         else:
-            print("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print("!!!                                          !!!")
-            print("!!! DESTINATION WILL BE PERMANENTLY CHANGED! !!!")
-            print("!!!         PRESS CTRL-C NOW TO EXIT         !!!")
-            print("!!!                                          !!!")
-            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
+            print("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", file = options.outfile)
+            print("!!!                                          !!!", file = options.outfile)
+            print("!!! DESTINATION WILL BE PERMANENTLY CHANGED! !!!", file = options.outfile)
+            print("!!!         PRESS CTRL-C NOW TO EXIT         !!!", file = options.outfile)
+            print("!!!                                          !!!", file = options.outfile)
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", file = options.outfile)
             time.sleep(5)
 
         workers = {}
@@ -349,4 +354,7 @@ if __name__ == "__main__":
 
         for i in xrange(options.workers):
             pid, err = os.wait()
-            print "Worker #%d exited with %d" % (workers[pid], err)
+            print("Worker #%d exited with %d" % (workers[pid], err), file = options.outfile)
+
+    if options.outfile:
+        options.outfile.close()
