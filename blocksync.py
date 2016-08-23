@@ -164,6 +164,8 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
             cmd += ['-i', options.keyfile]
         if options.compress:
             cmd += ['-C']
+        if options.sshparams:
+            cmd += options.sshparams.split()
         cmd += [dsthost]
     if options.sudo:
         cmd += ['sudo']
@@ -303,6 +305,7 @@ if __name__ == "__main__":
     parser.add_option("-S", "--script", dest = "script", help = "location of script on remote host (otherwise current script is sent over)")
     parser.add_option("-I", "--interpreter", dest = "interpreter", help = "[full path to] interpreter used to invoke remote server (defaults to python2)", default = "python2")
     parser.add_option("-t", "--interval", dest = "interval", type = "int", help = "interval between stats output (seconds, defaults to 1)", default = 1)
+    parser.add_option("-x", "--extraparams", dest = "sshparams", help = "additional parameters to pass to SSH")
     (options, args) = parser.parse_args()
 
     if len(args) < 2:
