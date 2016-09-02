@@ -24,6 +24,7 @@ Getting started:
 from __future__ import print_function
 import os
 import sys
+import signal
 from hashlib import sha512, sha384, sha1, md5
 from math import ceil
 import subprocess
@@ -315,6 +316,8 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(1)
 
+    aborting = False
+
     if options.outfile:
         options.outfile = open(options.outfile, 'a')
 
@@ -355,6 +358,16 @@ if __name__ == "__main__":
         for i in xrange(options.workers):
             pid, err = os.wait()
             print("Worker #%d exited with %d" % (workers[pid], err), file = options.outfile)
+            if (err != 0) and not aborting:
+                aborting = True
+                print("Worker #%d caused ABORT" % workers[pid])
+                del workers[pid]
+                for pid in workers:
+                    print("Terminating worker #%d" % workers[pid])
+                    os.kill(pid, signal.SIGTERM)
 
     if options.outfile:
         options.outfile.close()
+
+    if aborting:
+        sys,exit(1)
