@@ -35,24 +35,24 @@ SAME = b"0"
 DIFF = b"1"
 COMPLEN = len(SAME)  # SAME/DIFF length
 
+LOCAL_FADVISE = 1
+REMOTE_FADVISE = 2
+
 if callable(getattr(os, "posix_fadvise", False)):
-    from os import POSIX_FADV_NORMAL, POSIX_FADV_SEQUENTIAL, POSIX_FADV_RANDOM, \
-        POSIX_FADV_NOREUSE, POSIX_FADV_WILLNEED, POSIX_FADV_DONTNEED
-    posix_fadvise = lambda fileobj, offset, length, advice: os.posix_fadvise(fileobj.fileno(), offset, length, advice)
+    from os import posix_fadvise, POSIX_FADV_NOREUSE, POSIX_FADV_DONTNEED
+    fadvise = lambda fileobj, offset, length, advice: posix_fadvise(fileobj.fileno(), offset, length, advice)
 else:
     try:
-        from fadvise import POSIX_FADV_NORMAL, POSIX_FADV_SEQUENTIAL, POSIX_FADV_RANDOM, \
-            POSIX_FADV_NOREUSE, POSIX_FADV_WILLNEED, POSIX_FADV_DONTNEED
-        posix_fadvise = lambda fileobj, offset, length, advice: fadvise.set_advice(fileobj, advice, offset, length)
+        from fadvise import set_advice, POSIX_FADV_NOREUSE, POSIX_FADV_DONTNEED
+        fadvise = lambda fileobj, offset, length, advice: set_advice(fileobj, advice, offset, length)
     except:
-        posix_fadvise = None
+        fadvise = None
 
-if posix_fadvise:
+if fadvise:
     USE_DONTNEED = sys.platform.startswith('linux')
     USE_NOREUSE = not(USE_DONTNEED)
 else:
-    USE_DONTNEED = USE_NOREUSE = False
-
+    USE_NOREUSE = USE_DONTNEED = False
 
 def do_create(f, size):
     f = open(f, 'a', 0)
@@ -63,7 +63,7 @@ def do_create(f, size):
 def do_open(f, mode):
     f = open(f, mode)
     if USE_NOREUSE:
-        posix_fadvise(f, 0, 0, POSIX_FADV_NOREUSE)
+        fadvise(f, 0, 0, POSIX_FADV_NOREUSE)
     f.seek(0, 2)
     size = f.tell()
     f.seek(0)
@@ -76,11 +76,13 @@ def getblocks(f, blocksize):
         if not block:
             break
         if USE_DONTNEED:
-            posix_fadvise(f, f.tell() - blocksize, blocksize, POSIX_FADV_DONTNEED)
+            fadvise(f, f.tell() - blocksize, blocksize, POSIX_FADV_DONTNEED)
         yield block
 
 
 def server(dev, deleteonexit, options):
+    global USE_NOREUSE, USE_DONTNEED
+
     blocksize = options.blocksize
 
     hash1 = getattr(hashlib, options.hash.lower())
@@ -89,7 +91,10 @@ def server(dev, deleteonexit, options):
     print('init')
     sys.stdout.flush()
 
-    if USE_NOREUSE:
+    if (options.fadvise & REMOTE_FADVISE == 0):
+        print('Disabled')
+        USE_NOREUSE = USE_DONTNEED = False
+    elif USE_NOREUSE:
         print('NOREUSE')
     elif USE_DONTNEED:
         print('DONTNEED')
@@ -130,7 +135,7 @@ def server(dev, deleteonexit, options):
             f.seek(-newblocklen, 1)
             f.write(newblock)
             if USE_DONTNEED:
-                posix_fadvise(f, f.tell() - newblocklen, newblocklen, POSIX_FADV_DONTNEED)
+                fadvise(f, f.tell() - newblocklen, newblocklen, POSIX_FADV_DONTNEED)
         if i == maxblock:
             break
 
@@ -155,6 +160,8 @@ def copy_self(workerid, remotecmd):
 
 
 def sync(workerid, srcdev, dsthost, dstdev, options):
+    global USE_NOREUSE, USE_DONTNEED
+
     blocksize = options.blocksize
     addhash = options.addhash
     dryrun = options.dryrun
@@ -165,6 +172,17 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
 
     print("Starting worker #%d (pid: %d)" % (workerid, os.getpid()), file = options.outfile)
     print("[worker %d] Block size is %0.1f MB" % (workerid, blocksize / (1024.0 * 1024)), file = options.outfile)
+
+    if (options.fadvise & LOCAL_FADVISE == 0):
+        fadv = "Disabled"
+        USE_NOREUSE = USE_DONTNEED = False
+    elif USE_NOREUSE:
+        fadv = "NOREUSE"
+    elif USE_DONTNEED:
+        fadv = "DONTNEED"
+    else:
+        fadv = "None"
+    print("[worker %d] Local fadvise: %s" % (workerid, fadv), file = options.outfile)
 
     try:
         f, size = do_open(srcdev, 'rb')
@@ -221,7 +239,7 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
 
     cmd += [options.interpreter, remotescript, servercmd, dstdev, '-b', str(blocksize)]
 
-    cmd += ['-1', options.hash]
+    cmd += ['-d', str(options.fadvise), '-1', options.hash]
     if options.addhash:
         cmd += ['-2', options.addhash]
 
@@ -236,13 +254,6 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
         print("[worker %d] Error connecting to or invoking blocksync on the remote host!" % workerid, file = options.outfile)
         sys.exit(1)
 
-    if USE_NOREUSE:
-        fadv = "NOREUSE"
-    elif USE_DONTNEED:
-        fadv = "DONTNEED"
-    else:
-        fadv = "None"
-    print("[worker %d] Local fadvise: %s" % (workerid, fadv), file = options.outfile)
     fadv = p_out.readline().decode('UTF-8').strip()
     print("[worker %d] Remote fadvise: %s" % (workerid, fadv), file = options.outfile)
 
@@ -342,6 +353,7 @@ if __name__ == "__main__":
     parser.add_option("-b", "--blocksize", dest = "blocksize", type = "int", help = "block size (bytes, defaults to 1MB)", default = 1024 * 1024)
     parser.add_option("-1", "--hash", dest = "hash", help = "hash used for block comparison (defaults to \"sha512\")", default = "sha512")
     parser.add_option("-2", "--additionalhash", dest = "addhash", help = "second hash used for extra comparison (default is none)")
+    parser.add_option("-d", "--fadvise", dest = "fadvise", type = "int", help = "lower cache pressure by using posix_fadivse (requires Python 3 or python-fadvise; 0 = off, 1 = local on, 2 = remote on, 3 = both on; defaults to 3)", default = 3)
     parser.add_option("-p", "--pause", dest = "pause", type="int", help = "pause between processing blocks, reduces system load (ms, defaults to 0)", default = 0)
     parser.add_option("-c", "--cipher", dest = "cipher", help = "cipher specification for SSH (defaults to blowfish)", default = "blowfish")
     parser.add_option("-C", "--compress", dest = "compress", action = "store_true", help = "enable compression over SSH (defaults to on)", default = True)
