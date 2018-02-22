@@ -349,7 +349,7 @@ if __name__ == "__main__":
     from optparse import OptionParser, SUPPRESS_HELP
     parser = OptionParser(usage = "%prog [options] /dev/source [user@]remotehost [/dev/dest]")
     parser.add_option("-w", "--workers", dest = "workers", type = "int", help = "number of workers to fork (defaults to 1)", default = 1)
-    parser.add_option("-l", "--splay", dest = "splay", type = "int", help = "sleep between creating workers (ms, defaults to 0)", default = 0)
+    parser.add_option("-l", "--splay", dest = "splay", type = "int", help = "sleep between creating workers (ms, defaults to 0)", default = 250)
     parser.add_option("-b", "--blocksize", dest = "blocksize", type = "int", help = "block size (bytes, defaults to 1MB)", default = 1024 * 1024)
     parser.add_option("-1", "--hash", dest = "hash", help = "hash used for block comparison (defaults to \"sha512\")", default = "sha512")
     parser.add_option("-2", "--additionalhash", dest = "addhash", help = "second hash used for extra comparison (default is none)")
