@@ -367,6 +367,7 @@ if __name__ == "__main__":
     parser.add_option("-I", "--interpreter", dest = "interpreter", help = "[full path to] interpreter used to invoke remote server (defaults to python2)", default = "python2")
     parser.add_option("-t", "--interval", dest = "interval", type = "int", help = "interval between stats output (seconds, defaults to 1)", default = 1)
     parser.add_option("-o", "--output", dest = "outfile", help = "send output to file instead of console")
+    parser.add_option("-f", "--force", dest = "force", action= "store_true", help = "force sync and DO NOT ask for confirmation if the destination file already exists")
     (options, args) = parser.parse_args()
 
     if len(args) < 2:
@@ -396,6 +397,7 @@ if __name__ == "__main__":
         if options.dryrun:
             print("Dryrun - will only report differences, no data will be written", file = options.outfile)
         else:
+          if not options.force:
             print("\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", file = options.outfile)
             print("!!!                                          !!!", file = options.outfile)
             print("!!! DESTINATION WILL BE PERMANENTLY CHANGED! !!!", file = options.outfile)
