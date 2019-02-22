@@ -18,12 +18,5 @@ Please make sure that the source file isn't changed during sync, blocksync.py wi
 ## Command line options
 Please run python blocksync.py without any arguments to get a full list of possible options.
 
-## Future development
-When there is some spare time the following things should get some attention:
-
-* [x] write some documentation
-* [ ] Allow sync not only for devices but also for files
-* [ ] Allow sync to local file to be more flexible
-
 ## Contributing
 Please feel free to leave a bug report here at Github or drop a pull request - every help is welcome!
