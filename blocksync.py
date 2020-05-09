@@ -434,4 +434,4 @@ if __name__ == "__main__":
         options.outfile.close()
 
     if aborting:
-        sys,exit(1)
+        sys.exit(1)
