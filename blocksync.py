@@ -335,9 +335,6 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
         if pause_ms:
             time.sleep(pause_ms)
 
-        if not interactive:
-            continue
-
         t1 = float(time.time())
         if (t1 - t_last) >= interval:
             done_blocks = same_blocks + diff_blocks
@@ -347,7 +344,7 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
             last_blocks = done_blocks
             t_last = t1
 
-        if (same_blocks + diff_blocks) == size_blocks:
+        if (same_blocks + diff_blocks) >= size_blocks:
             break
 
     rate = size_blocks * blocksize / (1024.0 * 1024) / (time.time() - t0)
