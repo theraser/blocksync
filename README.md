@@ -12,7 +12,6 @@ blocksync.py is also a workaround for a limitation when using [rsync](https://rs
 * SSH client on source server
 * SSH server on destination server, with root permissions (directly using root login or using sudo) if syncing to a device file
 * Python on both source and destination server
-* blocksync.py in home directory of destination server (executable)
 
 ## Usage
 Please make sure that the source file isn't changed during sync, blocksync.py will **not** notice any changes made at file positions which were already copied. You may want to boot a live linux ([grml](https://grml.org/), [knoppix](http://www.knoppix.org), [systemrescuecd](http://www.system-rescue-cd.org) etc.) if you want to sync the system drives from a running machine.
