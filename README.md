@@ -19,6 +19,9 @@ Please make sure that the source file isn't changed during sync, blocksync.py wi
 ### Synchronize to a file on remote server
 `root@source# python blocksync.py /dev/source/file user@destination.example.com /path/to/destination/file`
 
+### Synchronize from a file on remote server
+`root@source# python blocksync.py --pull /dev/destination/file user@destination.example.com /path/to/source/file`
+
 ### Synchronize to a local file
 `root@source# python blocksync.py /dev/source/file localhost /path/to/destination/file`
 

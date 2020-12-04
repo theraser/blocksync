@@ -16,6 +16,7 @@ Getting started:
 * Make sure your local user can ssh to the remote host (use -i for a SSH key)
 * Invoke:
     python blocksync.py /dev/source [user@]remotehost [/dev/dest]
+    python blocksync.py --pull /dev/dest [user@]remotehost [/dev/source]
 
 * Specify localhost for local usage:
     python blocksync.py /dev/source localhost /dev/dest
@@ -107,7 +108,10 @@ def server(dev, deleteonexit, options):
         do_create(dev, size)
 
     print(dev, blocksize)
-    f, size = do_open(dev, 'rb+')
+    if options.pull:
+        f, size = do_open(dev, 'rb')
+    else:
+        f, size = do_open(dev, 'rb+')
     print(size)
     sys.stdout.flush()
 
@@ -130,12 +134,16 @@ def server(dev, deleteonexit, options):
         stdout.flush()
         res = stdin.read(COMPLEN)
         if res == DIFF:
-            newblock = stdin.read(blocksize)
-            newblocklen = len(newblock)
-            f.seek(-newblocklen, 1)
-            f.write(newblock)
-            if USE_DONTNEED:
-                fadvise(f, f.tell() - newblocklen, newblocklen, POSIX_FADV_DONTNEED)
+            if options.pull:
+                stdout.write(block)
+                stdout.flush()
+            else:
+                newblock = stdin.read(blocksize)
+                newblocklen = len(newblock)
+                f.seek(-newblocklen, 1)
+                f.write(newblock)
+                if USE_DONTNEED:
+                    fadvise(f, f.tell() - newblocklen, newblocklen, POSIX_FADV_DONTNEED)
         if i == maxblock:
             break
 
@@ -184,11 +192,18 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
         fadv = "None"
     print("[worker %d] Local fadvise: %s" % (workerid, fadv), file = options.outfile)
 
-    try:
-        f, size = do_open(srcdev, 'rb')
-    except Exception as e:
-        print("[worker %d] Error accessing source device! %s" % (workerid, e), file = options.outfile)
-        sys.exit(1)
+    if options.pull:
+        try:
+            f, size = do_open(srcdev, 'rb+')
+        except Exception as e:
+            print("[worker %d] Error accessing destination device! %s" % (workerid, e), file = options.outfile)
+            sys.exit(1)
+    else:
+        try:
+            f, size = do_open(srcdev, 'rb')
+        except Exception as e:
+            print("[worker %d] Error accessing source device! %s" % (workerid, e), file = options.outfile)
+            sys.exit(1)
 
     chunksize = int(size / options.workers)
     startpos = workerid * chunksize
@@ -242,6 +257,9 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
     cmd += ['-d', str(options.fadvise), '-1', options.hash]
     if options.addhash:
         cmd += ['-2', options.addhash]
+
+    if options.pull:
+        cmd += ['--pull']
 
     print("[worker %d] Running: %s" % (workerid, " ".join(cmd[2 if options.passenv and (dsthost != 'localhost') else 0:])), file = options.outfile)
 
@@ -317,8 +335,16 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
             else:
                 p_in.write(DIFF)
                 p_in.flush()
-                p_in.write(l_block)
-                p_in.flush()
+                if options.pull:
+                    newblock = p_out.read(blocksize)
+                    newblocklen = len(newblock)
+                    f.seek(-newblocklen, 1)
+                    f.write(newblock)
+                    if USE_DONTNEED:
+                        fadvise(f, f.tell() - newblocklen, newblocklen, POSIX_FADV_DONTNEED)
+                else:
+                    p_in.write(l_block)
+                    p_in.flush()
 
         if pause_ms:
             time.sleep(pause_ms)
@@ -367,7 +393,8 @@ if __name__ == "__main__":
     parser.add_option("-I", "--interpreter", dest = "interpreter", help = "[full path to] interpreter used to invoke remote server (defaults to python2)", default = "python2")
     parser.add_option("-t", "--interval", dest = "interval", type = "int", help = "interval between stats output (seconds, defaults to 1)", default = 1)
     parser.add_option("-o", "--output", dest = "outfile", help = "send output to file instead of console")
-    parser.add_option("-f", "--force", dest = "force", action= "store_true", help = "force sync and DO NOT ask for confirmation if the destination file already exists")
+    parser.add_option("-f", "--force", dest = "force", action = "store_true", help = "force sync and DO NOT ask for confirmation if the destination file already exists")
+    parser.add_option("--pull", dest = "pull", action = "store_true", help = "synchronize changes from the remote host to this host")
     (options, args) = parser.parse_args()
 
     if len(args) < 2:
