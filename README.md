@@ -28,3 +28,14 @@ Please run python blocksync.py without any arguments to get a full list of possi
 
 ## Contributing
 Please feel free to leave a bug report here at Github or drop a pull request - every help is welcome!
+
+## Docker
+
+Useful for imaging, re-imaging raspberry pi and similar SBC sd cards while only writing the minimum number of sectors.
+
+```bash
+docker run -t --network=none \
+    --device /dev/sdc:/dev/target \
+    -v "$PWD":/iso:ro \
+    corycarson/blocksync -I python3 /iso/ubuntu-20.04.3-preinstalled-server-arm64+raspi.img localhost /dev/target
+```
