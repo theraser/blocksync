@@ -34,8 +34,23 @@ Please feel free to leave a bug report here at Github or drop a pull request - e
 Useful for imaging, re-imaging raspberry pi and similar SBC sd cards while only writing the minimum number of sectors.
 
 ```bash
+# Double check that you're going to stomp the correct block device
+lsblk
+
 docker run -t --network=none \
-    --device /dev/sdc:/dev/target \
+    --device /dev/sda:/dev/target \
     -v "$PWD":/iso:ro \
-    corycarson/blocksync -I python3 /iso/ubuntu-20.04.3-preinstalled-server-arm64+raspi.img localhost /dev/target
+    corycarson/blocksync -I python3 /iso/ubuntu-22.04.1-preinstalled-server-arm64+raspi.img localhost /dev/target
 ```
+
+```
+[worker 0] same: 46, diff: 128, 174/947,   4.6 MB/s (0:09:23 remaining)
+[worker 0] same: 46, diff: 130, 176/947,   4.6 MB/s (0:09:23 remaining)
+[worker 0] same: 46, diff: 132, 178/947,   4.5 MB/s (0:09:23 remaining)
+[worker 0] same: 46, diff: 134, 180/947,   4.6 MB/s (0:09:23 remaining)
+[worker 0] same: 46, diff: 136, 182/947,   4.6 MB/s (0:09:22 remaining)
+[worker 0] same: 46, diff: 138, 184/947,   4.6 MB/s (0:09:22 remaining)
+[worker 0] same: 46, diff: 140, 186/947,   4.6 MB/s (0:09:22 remaining)
+[worker 0] same: 46, diff: 142, 188/947,   4.5 MB/s (0:09:22 remaining)
+```
+
