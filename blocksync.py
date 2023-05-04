@@ -57,14 +57,14 @@ else:
 def wrap(x):
     return ("'%s'" % x)
 
-def do_create(f, size):
-    f = open(f, 'wb', 0)
+def do_create(dev, size):
+    f = open(dev, 'wb', 0)
     f.truncate(size)
     f.close()
 
 
-def do_open(filename, mode):
-    f = open(filename, mode)
+def do_open(dev, mode):
+    f = open(dev, mode)
     if USE_NOREUSE:
         fadvise(f, 0, 0, POSIX_FADV_NOREUSE)
     f.seek(0, 2)
@@ -112,9 +112,13 @@ def server(dev, deleteonexit, options):
     print(dev)
     print(blocksize)
     try:
-        f, size = do_open(dev, 'rb+')
+        if options.reverse:
+            f, size = do_open(dev, 'rb')
+        else:
+           f, size = do_open(dev, 'rb+')
+ 
     except Exception as e:
-        # Error accessing source device
+        # Error accessing file
         print("-1")
         return
 
@@ -140,12 +144,16 @@ def server(dev, deleteonexit, options):
         stdout.flush()
         res = stdin.read(COMPLEN)
         if res == DIFF:
-            newblock = stdin.read(blocksize)
-            newblocklen = len(newblock)
-            f.seek(-newblocklen, 1)
-            f.write(newblock)
-            if USE_DONTNEED:
-                fadvise(f, f.tell() - newblocklen, newblocklen, POSIX_FADV_DONTNEED)
+          if options.reverse:
+              stdout.write(block)
+              stdout.flush()
+          else:
+              newblock = stdin.read(blocksize)
+              newblocklen = len(newblock)
+              f.seek(-newblocklen, 1)
+              f.write(newblock)
+              if USE_DONTNEED:
+                  fadvise(f, f.tell() - newblocklen, newblocklen, POSIX_FADV_DONTNEED)
         if i == maxblock:
             break
 
@@ -195,7 +203,10 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
     print("[worker %d] Local fadvise: %s" % (workerid, fadv), file = options.outfile)
 
     try:
-        f, size = do_open(srcdev, 'rb')
+        if options.reverse:
+          f, size = do_open(srcdev, 'rb+')
+      else:
+          f, size = do_open(srcdev, 'rb')
     except Exception as e:
         print("[worker %d] Error accessing source device! %s" % (workerid, e), file = options.outfile)
         sys.exit(1)
@@ -252,6 +263,9 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
     cmd += ['-d', str(options.fadvise), '-1', options.hash]
     if options.addhash:
         cmd += ['-2', options.addhash]
+
+    if options.reverse:
+        cmd += ['-R']
 
     print("[worker %d] Running: %s" % (workerid, " ".join(cmd[2 if options.passenv and (dsthost != 'localhost') else 0:])), file = options.outfile)
 
@@ -332,9 +346,16 @@ def sync(workerid, srcdev, dsthost, dstdev, options):
             else:
                 p_in.write(DIFF)
                 p_in.flush()
-                p_in.write(l_block)
-                p_in.flush()
-
+                if options.reverse:
+                  newblock = p_out.read(blocksize)
+                  newblocklen = len(newblock)
+                  f.seek(-newblocklen, 1)
+                  f.write(newblock)
+                  if USE_DONTNEED:
+                      fadvise(f, f.tell() - newblocklen, newblocklen, POSIX_FADV_DONTNEED)
+              else:
+                  p_in.write(l_block)
+                  p_in.flush()
         if pause_ms:
             time.sleep(pause_ms)
 
@@ -372,6 +393,7 @@ if __name__ == "__main__":
     parser.add_option("-p", "--pause", dest = "pause", type="int", help = "pause between processing blocks, reduces system load (ms, defaults to 0)", default = 0)
     parser.add_option("-c", "--cipher", dest = "cipher", help = "cipher specification for SSH (defaults to aes128-ctr)", default = "aes128-ctr")
     parser.add_option("-N", "--nocompress", dest = "compress", action = "store_false", help = "enable compression over SSH (defaults to on)", default = True)
+    parser.add_option("-R", "--reverse", dest = "reverse", action = "store_true", help = "Remote location to local", default = False)
     parser.add_option("-i", "--id", dest = "keyfile", help = "SSH public key file")
     parser.add_option("-P", "--pass", dest = "passenv", help = "environment variable containing SSH password (requires sshpass)")
     parser.add_option("-s", "--sudo", dest = "sudo", action = "store_true", help = "use sudo on the remote end (defaults to off)", default = False)
